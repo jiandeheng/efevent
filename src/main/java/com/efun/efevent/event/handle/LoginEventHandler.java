@@ -11,6 +11,9 @@ import com.efun.efevent.event.EventHandler;
  */
 public class LoginEventHandler implements EventHandler {
 
+	/**
+	 * 事件处理逻辑
+	 */
 	@Override
 	public void handle(Event event) {
 		try {
@@ -21,6 +24,9 @@ public class LoginEventHandler implements EventHandler {
 		System.out.println("LoginEventHandler doing, event = " + event);
 	}
 
+	/**
+	 * 返回绑定的事件标识
+	 */
 	@Override
 	public String bindEvent() {
 		return "login_event";

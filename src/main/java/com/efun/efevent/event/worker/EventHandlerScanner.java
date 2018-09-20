@@ -4,6 +4,8 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.efun.efevent.event.EventHandler;
+
 /**
  * 事件处理器扫描器
  * 
@@ -37,7 +39,10 @@ public class EventHandlerScanner {
 			for (String className : classNames) {
 				try {
 					Class clazz = classLoader.loadClass(className);
-					classes.add(clazz);
+					// 实现了事件处理器接口
+					if (EventHandler.class.isAssignableFrom(clazz)) {
+						classes.add(clazz);
+					}
 				} catch (ClassNotFoundException e) {
 					System.out.println(className + " ClassNotFoundException");
 				}
@@ -55,8 +60,7 @@ public class EventHandlerScanner {
 	private String resovleRootPath(String packPath) {
 		File file = new File(getClass().getResource("/").getPath());
 		String path = file.getAbsolutePath();
-		String packageName = getClass().getPackage().getName()
-				.replace(".", "\\");
+		String packageName = getClass().getPackage().getName().replace(".", "\\");
 		path = path.replace(packageName, "");
 		String packagePath = packPath.replace(".", "\\");
 		path = path + "\\" + packagePath;

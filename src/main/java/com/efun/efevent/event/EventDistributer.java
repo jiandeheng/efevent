@@ -4,14 +4,25 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import javax.annotation.PostConstruct;
 
 import org.apache.rocketmq.client.consumer.DefaultMQPushConsumer;
+import org.apache.rocketmq.client.consumer.listener.ConsumeConcurrentlyContext;
+import org.apache.rocketmq.client.consumer.listener.ConsumeConcurrentlyStatus;
+import org.apache.rocketmq.client.consumer.listener.MessageListenerConcurrently;
+import org.apache.rocketmq.common.consumer.ConsumeFromWhere;
+import org.apache.rocketmq.common.message.MessageExt;
+import org.apache.rocketmq.common.protocol.heartbeat.MessageModel;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationListener;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 
+import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONObject;
 import com.efun.efevent.event.worker.EventHandlerScanner;
 
 /**
@@ -23,18 +34,82 @@ import com.efun.efevent.event.worker.EventHandlerScanner;
 @Component
 public class EventDistributer implements ApplicationListener<Event> {
 
-	private static List<Class> eventHandlerClasses = new ArrayList<Class>();
+	@Autowired
+	RedisTemplate<String, Object> redisTemplate;
 
+	/**
+	 * MQ消费者
+	 */
 	private static DefaultMQPushConsumer producer = null;
+
+	/**
+	 * MQ开关
+	 */
+	private static final boolean MQ_SWITCH = false;
+
+	/**
+	 * redis开关
+	 */
+	private static final boolean REDIS_SWITCH = true;
+
+	private static final String CONSUMER_GROUP = "EventDistributer";
+	private static final String NAME_SERVER_ADDRESS = "127.0.0.1:9876";
 
 	/**
 	 * 事件处理器实例map（key：事件标识, value：绑定的事件处理器集合）
 	 */
 	private static Map<String, List<EventHandler>> eventHandlers = new HashMap<>();
 
-	private void startConsumer() {
-		producer = new DefaultMQPushConsumer();
+	/**
+	 * 初始化事件分发器
+	 */
+	@PostConstruct
+	private void initEventDistributer() {
+		// 初始化事件处理器
+		initEventHandlers();
+		// 启动redis事件队列监听线程
+		startRedisEventQueueListenerWorkers();
+		// 启动消费者
+		startConsumer();
+	}
 
+	/**
+	 * 启动MQ消费者
+	 */
+	private void startConsumer() {
+		if (!MQ_SWITCH) {
+			return;
+		}
+		try {
+			producer = new DefaultMQPushConsumer();
+			producer.setConsumerGroup(CONSUMER_GROUP);
+			producer.setNamesrvAddr(NAME_SERVER_ADDRESS);
+			producer.setConsumeFromWhere(ConsumeFromWhere.CONSUME_FROM_FIRST_OFFSET);
+			producer.setMessageModel(MessageModel.CLUSTERING);
+			if (!eventHandlers.isEmpty()) {
+				for (String eventCode : eventHandlers.keySet()) {
+					producer.subscribe(eventCode, "*");
+				}
+			}
+			producer.registerMessageListener(new MessageListenerConcurrently() {
+				@Override
+				public ConsumeConcurrentlyStatus consumeMessage(List<MessageExt> msgs,
+						ConsumeConcurrentlyContext context) {
+					System.out.println("## receive new MQ message = " + msgs);
+					MessageExt msg = msgs.get(0);
+					String topic = msg.getTopic();
+					String tags = msg.getTags();
+					String eventJsonString = JSON.parseObject(msg.getBody(), String.class);
+					Event event = JSONObject.parseObject(eventJsonString, Event.class);
+					System.out.println("# receive topic = " + topic + ", tags = " + tags + ", event = " + event);
+					distributeEvent(event);
+					return ConsumeConcurrentlyStatus.CONSUME_SUCCESS;
+				}
+			});
+		} catch (Exception e) {
+			System.out.println("startConsumer exception = " + e);
+			e.printStackTrace();
+		}
 	}
 
 	@Async
@@ -64,16 +139,15 @@ public class EventDistributer implements ApplicationListener<Event> {
 	 * 初始化事件处理器类集合
 	 * 
 	 */
-	@PostConstruct
+
 	private void initEventHandlers() {
 		// 扫描事件处理器文件，得到所有事件处理器的class集合
 		EventHandlerScanner eventHandlerScanner = new EventHandlerScanner();
-		List<Class> classes = eventHandlerScanner.listAllEventHandlerClass();
-		this.eventHandlerClasses = classes;
+		List<Class> eventHandlerClasses = eventHandlerScanner.listAllEventHandlerClass();
 		// 实例化所有事件处理器,并与事件标识搭建关系
 		List<EventHandler> list = new ArrayList<>();
 		try {
-			for (Class clazz : this.eventHandlerClasses) {
+			for (Class clazz : eventHandlerClasses) {
 				Object object = clazz.newInstance();
 				if (object instanceof EventHandler) {
 					EventHandler eventHandler = (EventHandler) object;
@@ -101,6 +175,85 @@ public class EventDistributer implements ApplicationListener<Event> {
 		}
 		List<EventHandler> list = eventHandlers.get(eventCode);
 		list.add(eventHandler);
+	}
+
+	/**
+	 * 启动redis事件队列监听线程
+	 */
+	private void startRedisEventQueueListenerWorkers() {
+		if (!REDIS_SWITCH) {
+			return;
+		}
+		// 事件标识集合
+		Set<String> eventCodes = eventHandlers.keySet();
+		if (eventCodes.isEmpty()) {
+			System.out.println("没有事件处理器，不需要监听redis事件队列");
+			return;
+		}
+		// 启动监听redis事件队列线程（一个事件一个队列一个线程监听）
+		for (String eventCode : eventCodes) {
+			Thread redisEventQueueListenerWorkerThread = new Thread(new RedisEventQueueListenerWorker(eventCode));
+			redisEventQueueListenerWorkerThread.setName("redisEventQueueListenerWorkerThread_" + eventCode);
+			redisEventQueueListenerWorkerThread.start();
+		}
+	}
+
+	/**
+	 * redis事件队列监听worker
+	 * 
+	 * @author Ken
+	 *
+	 */
+	class RedisEventQueueListenerWorker implements Runnable {
+
+		/**
+		 * 事件标识
+		 */
+		private String eventCode;
+
+		/**
+		 * 线程最大休息轮数
+		 */
+		private static final int MAX_ROUND = 5;
+
+		/**
+		 * 每轮休息的时间（毫秒）
+		 */
+		private static final long SLEEP_TIME_PER_ROUND = 10 * 1000;
+
+		public RedisEventQueueListenerWorker(String eventCode) {
+			this.eventCode = eventCode;
+		}
+
+		@Override
+		public void run() {
+			try {
+				// 停止监听轮数，越久没事件来，线程休息越久（会有个阈值）
+				int round = 0;
+				String eventQueueKey = EventManager.getRedisEventQueueCacheKey(eventCode);
+				while (true) {
+					// 分发事件
+					Object object = redisTemplate.opsForList().rightPop(eventQueueKey);
+					if (object != null) {
+						if (object instanceof Event) {
+							Event event = (Event) object;
+							// 分发交给事件处理器处理应该是异步的
+							distributeEvent(event);
+							// 重置轮数
+							round = 0;
+						}
+						continue;
+					}
+					// 没事件来，休息一会
+					System.out.println("# redis事件队列没事件来, eventCode = " + eventCode + ", round = " + round);
+					round = round >= MAX_ROUND ? MAX_ROUND : round++;
+
+					Thread.sleep(round * SLEEP_TIME_PER_ROUND);
+				}
+			} catch (InterruptedException e) {
+				e.printStackTrace();
+			}
+		}
 	}
 
 }

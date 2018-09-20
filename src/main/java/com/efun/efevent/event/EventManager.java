@@ -1,5 +1,10 @@
 package com.efun.efevent.event;
 
+import java.io.UnsupportedEncodingException;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
 import javax.annotation.PostConstruct;
 
 import org.apache.rocketmq.client.exception.MQBrokerException;
@@ -33,7 +38,7 @@ public class EventManager {
 
 	private static DefaultMQProducer producer = null;
 
-	private static final String PRODUCER_GROUP = "producerA";
+	private static final String PRODUCER_GROUP = "EventManager";
 	private static final String NAME_SERVER_ADDRESS = "127.0.0.1:9876";
 
 	/**
@@ -50,6 +55,11 @@ public class EventManager {
 	 * redis开关
 	 */
 	private static final boolean REDIS_SWITCH = true;
+
+	/**
+	 * 事件处理器实例map（key：事件标识, value：绑定的事件处理器集合）
+	 */
+	private static Map<String, List<EventHandler>> eventHandlers = new HashMap<>();
 
 	/**
 	 * 发布事件
@@ -90,8 +100,9 @@ public class EventManager {
 				System.out.println("生产者未启动f");
 			}
 			sendMessage(event);
-		} catch (MQClientException | RemotingException | MQBrokerException
-				| InterruptedException e) {
+		} catch (MQClientException | RemotingException | MQBrokerException | InterruptedException e) {
+			e.printStackTrace();
+		} catch (UnsupportedEncodingException e) {
 			e.printStackTrace();
 		}
 	}
@@ -104,13 +115,14 @@ public class EventManager {
 	 * @throws RemotingException
 	 * @throws MQBrokerException
 	 * @throws InterruptedException
+	 * @throws UnsupportedEncodingException
 	 */
-	private void sendMessage(Event event) throws MQClientException,
-			RemotingException, MQBrokerException, InterruptedException {
+	private void sendMessage(Event event) throws MQClientException, RemotingException, MQBrokerException,
+			InterruptedException, UnsupportedEncodingException {
 		Message message = new Message();
 		message.setTopic(event.getEventCode());
-		message.setBody(event.getData()
-				.getBytes(RemotingHelper.DEFAULT_CHARSET));
+		String eventJsonString = JSONObject.toJSONString(event);
+		message.setBody(eventJsonString.getBytes(RemotingHelper.DEFAULT_CHARSET));
 		SendResult sendResult = producer.send(message);
 		System.out.println("# send Message, result = " + sendResult);
 	}
@@ -121,7 +133,6 @@ public class EventManager {
 	 * @throws MQClientException
 	 * 
 	 */
-	@PostConstruct
 	private void startProducer() throws MQClientException {
 		producer = new DefaultMQProducer();
 		producer.setProducerGroup(PRODUCER_GROUP);
@@ -138,10 +149,9 @@ public class EventManager {
 		if (!REDIS_SWITCH) {
 			return;
 		}
-		String key = getEventQueueCacheKey(event.getEventCode());
+		String key = getRedisEventQueueCacheKey(event.getEventCode());
 		String jsonString = JSONObject.toJSONString(event);
-		redisTemplate.opsForList().leftPush(key,
-				JSONObject.parseObject(jsonString));
+		redisTemplate.opsForList().leftPush(key, JSONObject.parseObject(jsonString));
 	}
 
 	/**
@@ -150,7 +160,7 @@ public class EventManager {
 	 * @param eventCode
 	 * @return
 	 */
-	private String getEventQueueCacheKey(String eventCode) {
+	public static String getRedisEventQueueCacheKey(String eventCode) {
 		StringBuilder cacheKey = new StringBuilder(EVENT_REDIS_KEY_PREFIX);
 		cacheKey.append(eventCode);
 		return cacheKey.toString();
@@ -164,6 +174,15 @@ public class EventManager {
 	private void publishToApplication(Event event) {
 		applicationEventPublisher.publishEvent(event);
 		System.out.println("start publishToApplication");
+	}
+
+	@PostConstruct
+	private void initEventManager() {
+		try {
+			startProducer();
+		} catch (MQClientException e) {
+			System.out.println("start mq producer exception , e = " + e);
+		}
 	}
 
 }

@@ -152,7 +152,8 @@ public class EventManager {
 			return;
 		}
 		String key = getRedisEventQueueCacheKey(event.getEventCode());
-		Long result = redisTemplate.opsForList().leftPush(key, JSON.toJSON(event));
+		// Long result = redisTemplate.opsForList().leftPush(key, JSON.toJSON(event));
+		Long result = redisTemplate.opsForList().leftPush(key, event);
 		System.out.println(
 				"## publish event to redis queue, result = " + result + " key = " + key + ", event = " + event);
 	}

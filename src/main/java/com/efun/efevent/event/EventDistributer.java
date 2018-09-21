@@ -249,7 +249,9 @@ public class EventDistributer implements ApplicationListener<Event> {
 					Object object = redisTemplate.opsForList().rightPop(eventQueueKey);
 					if (object != null) {
 						System.out.println("## object = " + object);
-						Event event = JSONObject.parseObject(JSONObject.toJSONString(object), Event.class);
+						// Event event = JSONObject.parseObject(JSONObject.toJSONString(object),
+						// Event.class);
+						Event event = (Event) object;
 						System.out.println("## receive event from redis queue, eventQueueKey = " + eventQueueKey
 								+ ", event = " + event);
 						// 分发交给事件处理器处理应该是异步的

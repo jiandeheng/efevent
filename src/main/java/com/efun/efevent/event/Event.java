@@ -32,6 +32,10 @@ public class Event extends ApplicationEvent {
 	public Event(Object source) {
 		super(source);
 	}
+	
+	public Event() {
+		super(new Object());
+	}
 
 	/**
 	 * @return the eventCode

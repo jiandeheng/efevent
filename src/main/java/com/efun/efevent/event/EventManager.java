@@ -12,14 +12,13 @@ import org.apache.rocketmq.client.exception.MQClientException;
 import org.apache.rocketmq.client.producer.DefaultMQProducer;
 import org.apache.rocketmq.client.producer.SendResult;
 import org.apache.rocketmq.common.message.Message;
-import org.apache.rocketmq.remoting.common.RemotingHelper;
 import org.apache.rocketmq.remoting.exception.RemotingException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Component;
 
-import com.alibaba.fastjson.JSONObject;
+import com.alibaba.fastjson.JSON;
 
 /**
  * 事件管理器
@@ -49,7 +48,7 @@ public class EventManager {
 	/**
 	 * MQ开关
 	 */
-	private static final boolean MQ_SWITCH = false;
+	private static final boolean MQ_SWITCH = true;
 
 	/**
 	 * redis开关
@@ -121,10 +120,9 @@ public class EventManager {
 			InterruptedException, UnsupportedEncodingException {
 		Message message = new Message();
 		message.setTopic(event.getEventCode());
-		String eventJsonString = JSONObject.toJSONString(event);
-		message.setBody(eventJsonString.getBytes(RemotingHelper.DEFAULT_CHARSET));
+		message.setBody((JSON.toJSONBytes(event, JSON.DEFAULT_GENERATE_FEATURE)));
 		SendResult sendResult = producer.send(message);
-		System.out.println("# send Message, result = " + sendResult);
+		System.out.println("# send MQ Message, result = " + sendResult);
 	}
 
 	/**
@@ -134,6 +132,10 @@ public class EventManager {
 	 * 
 	 */
 	private void startProducer() throws MQClientException {
+		if (!MQ_SWITCH) {
+			return;
+		}
+		System.out.println("## startProducer ... ");
 		producer = new DefaultMQProducer();
 		producer.setProducerGroup(PRODUCER_GROUP);
 		producer.setNamesrvAddr(NAME_SERVER_ADDRESS);
@@ -150,8 +152,9 @@ public class EventManager {
 			return;
 		}
 		String key = getRedisEventQueueCacheKey(event.getEventCode());
-		String jsonString = JSONObject.toJSONString(event);
-		redisTemplate.opsForList().leftPush(key, JSONObject.parseObject(jsonString));
+		Long result = redisTemplate.opsForList().leftPush(key, event);
+		System.out.println(
+				"## publish event to redis queue, result = " + result + " key = " + key + ", event = " + event);
 	}
 
 	/**
@@ -178,6 +181,7 @@ public class EventManager {
 
 	@PostConstruct
 	private void initEventManager() {
+		System.out.println("## start initEventManager ...");
 		try {
 			startProducer();
 		} catch (MQClientException e) {

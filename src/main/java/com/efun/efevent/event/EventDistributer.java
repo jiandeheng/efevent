@@ -23,7 +23,6 @@ import org.springframework.stereotype.Component;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
-import com.efun.efevent.event.worker.EventHandlerScanner;
 
 /**
  * 事件分发者
@@ -40,12 +39,12 @@ public class EventDistributer implements ApplicationListener<Event> {
 	/**
 	 * MQ消费者
 	 */
-	private static DefaultMQPushConsumer producer = null;
+	private static DefaultMQPushConsumer consumer = null;
 
 	/**
 	 * MQ开关
 	 */
-	private static final boolean MQ_SWITCH = false;
+	private static final boolean MQ_SWITCH = true;
 
 	/**
 	 * redis开关
@@ -65,6 +64,7 @@ public class EventDistributer implements ApplicationListener<Event> {
 	 */
 	@PostConstruct
 	private void initEventDistributer() {
+		System.out.println("## start initEventDistributer ...");
 		// 初始化事件处理器
 		initEventHandlers();
 		// 启动redis事件队列监听线程
@@ -80,32 +80,43 @@ public class EventDistributer implements ApplicationListener<Event> {
 		if (!MQ_SWITCH) {
 			return;
 		}
+		System.out.println("## startConsumer ... ");
 		try {
-			producer = new DefaultMQPushConsumer();
-			producer.setConsumerGroup(CONSUMER_GROUP);
-			producer.setNamesrvAddr(NAME_SERVER_ADDRESS);
-			producer.setConsumeFromWhere(ConsumeFromWhere.CONSUME_FROM_FIRST_OFFSET);
-			producer.setMessageModel(MessageModel.CLUSTERING);
+			consumer = new DefaultMQPushConsumer();
+			consumer.setConsumerGroup(CONSUMER_GROUP);
+			consumer.setNamesrvAddr(NAME_SERVER_ADDRESS);
+			consumer.setConsumeFromWhere(ConsumeFromWhere.CONSUME_FROM_FIRST_OFFSET);
+			consumer.setMessageModel(MessageModel.CLUSTERING);
 			if (!eventHandlers.isEmpty()) {
 				for (String eventCode : eventHandlers.keySet()) {
-					producer.subscribe(eventCode, "*");
+					consumer.subscribe(eventCode, "*");
+					System.out.println("## Event MQ consumer subscribe " + eventCode);
 				}
 			}
-			producer.registerMessageListener(new MessageListenerConcurrently() {
+			consumer.registerMessageListener(new MessageListenerConcurrently() {
 				@Override
 				public ConsumeConcurrentlyStatus consumeMessage(List<MessageExt> msgs,
 						ConsumeConcurrentlyContext context) {
-					System.out.println("## receive new MQ message = " + msgs);
 					MessageExt msg = msgs.get(0);
+					System.out.println("## receive new MQ message = " + msg);
 					String topic = msg.getTopic();
 					String tags = msg.getTags();
-					String eventJsonString = JSON.parseObject(msg.getBody(), String.class);
-					Event event = JSONObject.parseObject(eventJsonString, Event.class);
+					JSONObject eventJsonObj = JSON.parseObject(msg.getBody(), JSONObject.class);
+					String eventJsonString = eventJsonObj.toJSONString();
+					System.out.println("# eventJsonString = " + eventJsonString);
+					Event event = null;
+					try {
+						event = JSONObject.parseObject(msg.getBody(), Event.class);
+					} catch (Exception e) {
+						System.out.println("## parseObject event exception " + e);
+					}
+					System.out.println("## event = " + event);
 					System.out.println("# receive topic = " + topic + ", tags = " + tags + ", event = " + event);
 					distributeEvent(event);
 					return ConsumeConcurrentlyStatus.CONSUME_SUCCESS;
 				}
 			});
+			consumer.start();
 		} catch (Exception e) {
 			System.out.println("startConsumer exception = " + e);
 			e.printStackTrace();
@@ -227,6 +238,8 @@ public class EventDistributer implements ApplicationListener<Event> {
 
 		@Override
 		public void run() {
+			System.out.println(
+					"## redisEventQueueListenerWorkerThread start ... thead = " + Thread.currentThread().getName());
 			try {
 				// 停止监听轮数，越久没事件来，线程休息越久（会有个阈值）
 				int round = 0;
@@ -237,6 +250,8 @@ public class EventDistributer implements ApplicationListener<Event> {
 					if (object != null) {
 						if (object instanceof Event) {
 							Event event = (Event) object;
+							System.out.println("## receive event from redis queue, eventQueueKey = " + eventQueueKey
+									+ ", event = " + event);
 							// 分发交给事件处理器处理应该是异步的
 							distributeEvent(event);
 							// 重置轮数
@@ -245,9 +260,14 @@ public class EventDistributer implements ApplicationListener<Event> {
 						continue;
 					}
 					// 没事件来，休息一会
-					System.out.println("# redis事件队列没事件来, eventCode = " + eventCode + ", round = " + round);
-					round = round >= MAX_ROUND ? MAX_ROUND : round++;
-
+					System.out.println("# redis事件队列没事件来, eventCode = " + eventCode + ", round = " + round
+							+ ", thread = " + Thread.currentThread().getName());
+					// round = round >= MAX_ROUND ? MAX_ROUND : (round++);
+					if (round >= MAX_ROUND) {
+						round = MAX_ROUND;
+					} else {
+						round++;
+					}
 					Thread.sleep(round * SLEEP_TIME_PER_ROUND);
 				}
 			} catch (InterruptedException e) {

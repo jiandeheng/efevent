@@ -4,12 +4,12 @@ import com.efun.efevent.event.Event;
 import com.efun.efevent.event.EventHandler;
 
 /**
- * 登录事件处理器
+ * 登出事件处理器
  * 
  * @author Ken
  *
  */
-public class LoginEventHandler implements EventHandler {
+public class LogoutEventHandler implements EventHandler {
 
 	/**
 	 * 事件处理逻辑
@@ -17,9 +17,9 @@ public class LoginEventHandler implements EventHandler {
 	@Override
 	public void handle(Event event) {
 		try {
-			System.out.println("LoginEventHandler start ..., event = " + event);
+			System.out.println("LogoutEventHandler start ..., event = " + event);
 			Thread.sleep(5000);
-			System.out.println("LoginEventHandler end ... ");
+			System.out.println("LogoutEventHandler end ... ");
 		} catch (InterruptedException e) {
 			e.printStackTrace();
 		}
@@ -30,7 +30,7 @@ public class LoginEventHandler implements EventHandler {
 	 */
 	@Override
 	public String bindEvent() {
-		return "login_event";
+		return "logout_event";
 	}
 
 }

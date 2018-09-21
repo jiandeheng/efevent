@@ -19,10 +19,10 @@ public class EventFactory {
 	 * @param data
 	 * @return
 	 */
-	public static Event create(String eventCode, JSONObject data) {
+	public static Event create(String eventCode, Object data) {
 		Event event = new Event(new Object());
 		event.setEventCode(eventCode);
-		event.setData(data);
+		event.setData(JSONObject.parseObject(JSONObject.toJSONString(data)));
 		event.setCreatedTime(new Date());
 		event.setLastUpdateTime(new Date());
 		event.setTimes(1);

@@ -115,9 +115,8 @@ public class Event extends ApplicationEvent {
 	 */
 	@Override
 	public String toString() {
-		return "Event [eventCode=" + eventCode + ", data=" + data + ", times="
-				+ times + ", createdTime=" + createdTime + ", lastUpdateTime="
-				+ lastUpdateTime + "]";
+		return "Event [eventCode=" + eventCode + ", data=" + data + ", times=" + times + ", createdTime=" + createdTime
+				+ ", lastUpdateTime=" + lastUpdateTime + "]";
 	}
 
 }

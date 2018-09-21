@@ -152,12 +152,12 @@ public class EventDistributer implements ApplicationListener<Event> {
 	 */
 
 	private void initEventHandlers() {
-		// 扫描事件处理器文件，得到所有事件处理器的class集合
-		EventHandlerScanner eventHandlerScanner = new EventHandlerScanner();
-		List<Class> eventHandlerClasses = eventHandlerScanner.listAllEventHandlerClass();
-		// 实例化所有事件处理器,并与事件标识搭建关系
-		List<EventHandler> list = new ArrayList<>();
 		try {
+			// 扫描事件处理器文件，得到所有事件处理器的class集合
+			EventHandlerScanner eventHandlerScanner = new EventHandlerScanner();
+			List<Class> eventHandlerClasses = eventHandlerScanner.listAllEventHandlerClass();
+			// 实例化所有事件处理器,并与事件标识搭建关系
+			List<EventHandler> list = new ArrayList<>();
 			for (Class clazz : eventHandlerClasses) {
 				Object object = clazz.newInstance();
 				if (object instanceof EventHandler) {
@@ -248,15 +248,14 @@ public class EventDistributer implements ApplicationListener<Event> {
 					// 分发事件
 					Object object = redisTemplate.opsForList().rightPop(eventQueueKey);
 					if (object != null) {
-						if (object instanceof Event) {
-							Event event = (Event) object;
-							System.out.println("## receive event from redis queue, eventQueueKey = " + eventQueueKey
-									+ ", event = " + event);
-							// 分发交给事件处理器处理应该是异步的
-							distributeEvent(event);
-							// 重置轮数
-							round = 0;
-						}
+						System.out.println("## object = " + object);
+						Event event = JSONObject.parseObject(JSONObject.toJSONString(object), Event.class);
+						System.out.println("## receive event from redis queue, eventQueueKey = " + eventQueueKey
+								+ ", event = " + event);
+						// 分发交给事件处理器处理应该是异步的
+						distributeEvent(event);
+						// 重置轮数
+						round = 0;
 						continue;
 					}
 					// 没事件来，休息一会

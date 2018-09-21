@@ -15,12 +15,24 @@ import com.efun.efevent.event.EventFactory;
 import com.efun.efevent.event.EventManager;
 
 @RestController
+@RequestMapping("event")
 public class IndexController {
 
 	@Autowired
 	EventManager eventManager;
 
-	@RequestMapping("/index")
+	/**
+	 * 模拟发布
+	 * 
+	 * @param value
+	 *            随便写
+	 * @param isPublishToMiddleware
+	 *            是否发布到中间件
+	 * @param eventCode
+	 *            事件标识
+	 * @return
+	 */
+	@RequestMapping("/test")
 	public ResponseEntity<Map<String, Object>> index(String value, boolean isPublishToMiddleware, String eventCode) {
 		Map<String, Object> result = new HashMap<String, Object>();
 		JSONObject data = new JSONObject();

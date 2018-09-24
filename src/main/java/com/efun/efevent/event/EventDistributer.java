@@ -5,6 +5,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 import javax.annotation.PostConstruct;
 
@@ -44,7 +47,7 @@ public class EventDistributer implements ApplicationListener<Event> {
 	/**
 	 * MQ开关
 	 */
-	private static final boolean MQ_SWITCH = true;
+	private static final boolean MQ_SWITCH = false;
 
 	/**
 	 * redis开关
@@ -58,6 +61,15 @@ public class EventDistributer implements ApplicationListener<Event> {
 	 * 事件处理器实例map（key：事件标识, value：绑定的事件处理器集合）
 	 */
 	private static Map<String, List<EventHandler>> eventHandlers = new HashMap<>();
+
+	private static final int CORE_POOL_SIZE = 4;
+	private static final int MAXIMUM_POOL_SIZE = 8;
+	private static final long KEEP_ALIVE_TIME = 600;
+	private static final TimeUnit TIME_UNIT = TimeUnit.SECONDS;
+	private static final int BLOCKING_QUEUE_CAPACITY = 1000;
+	private static ThreadPoolExecutor threadPool = new ThreadPoolExecutor(
+			CORE_POOL_SIZE, MAXIMUM_POOL_SIZE, KEEP_ALIVE_TIME, TIME_UNIT,
+			new ArrayBlockingQueue<Runnable>(BLOCKING_QUEUE_CAPACITY));
 
 	/**
 	 * 初始化事件分发器
@@ -90,28 +102,35 @@ public class EventDistributer implements ApplicationListener<Event> {
 			if (!eventHandlers.isEmpty()) {
 				for (String eventCode : eventHandlers.keySet()) {
 					consumer.subscribe(eventCode, "*");
-					System.out.println("## Event MQ consumer subscribe " + eventCode);
+					System.out.println("## Event MQ consumer subscribe "
+							+ eventCode);
 				}
 			}
 			consumer.registerMessageListener(new MessageListenerConcurrently() {
 				@Override
-				public ConsumeConcurrentlyStatus consumeMessage(List<MessageExt> msgs,
+				public ConsumeConcurrentlyStatus consumeMessage(
+						List<MessageExt> msgs,
 						ConsumeConcurrentlyContext context) {
 					MessageExt msg = msgs.get(0);
 					System.out.println("## receive new MQ message = " + msg);
 					String topic = msg.getTopic();
 					String tags = msg.getTags();
-					JSONObject eventJsonObj = JSON.parseObject(msg.getBody(), JSONObject.class);
+					JSONObject eventJsonObj = JSON.parseObject(msg.getBody(),
+							JSONObject.class);
 					String eventJsonString = eventJsonObj.toJSONString();
-					System.out.println("# eventJsonString = " + eventJsonString);
+					System.out
+							.println("# eventJsonString = " + eventJsonString);
 					Event event = null;
 					try {
-						event = JSONObject.parseObject(msg.getBody(), Event.class);
+						event = JSONObject.parseObject(msg.getBody(),
+								Event.class);
 					} catch (Exception e) {
-						System.out.println("## parseObject event exception " + e);
+						System.out.println("## parseObject event exception "
+								+ e);
 					}
 					System.out.println("## event = " + event);
-					System.out.println("# receive topic = " + topic + ", tags = " + tags + ", event = " + event);
+					System.out.println("# receive topic = " + topic
+							+ ", tags = " + tags + ", event = " + event);
 					distributeEvent(event);
 					return ConsumeConcurrentlyStatus.CONSUME_SUCCESS;
 				}
@@ -142,7 +161,7 @@ public class EventDistributer implements ApplicationListener<Event> {
 			return;
 		}
 		for (EventHandler eventHandler : eventHandlers.get(eventCode)) {
-			eventHandler.run(event);
+			threadPool.execute(new EventDistributeWorker(eventHandler, event));
 		}
 	}
 
@@ -151,14 +170,15 @@ public class EventDistributer implements ApplicationListener<Event> {
 	 * 
 	 */
 
+	@SuppressWarnings("rawtypes")
 	private void initEventHandlers() {
 		try {
 			// 扫描事件处理器文件，得到所有事件处理器的class集合
 			EventHandlerScanner eventHandlerScanner = new EventHandlerScanner();
-			List<Class> eventHandlerClasses = eventHandlerScanner.listAllEventHandlerClass();
+			List<Class> eventHandlerClasses = eventHandlerScanner
+					.listAllEventHandlerClass();
 			// 实例化所有事件处理器,并与事件标识搭建关系
-			List<EventHandler> list = new ArrayList<>();
-			for (Class clazz : eventHandlerClasses) {
+			for (Class<?> clazz : eventHandlerClasses) {
 				Object object = clazz.newInstance();
 				if (object instanceof EventHandler) {
 					EventHandler eventHandler = (EventHandler) object;
@@ -167,7 +187,8 @@ public class EventDistributer implements ApplicationListener<Event> {
 				}
 			}
 		} catch (Exception e) {
-			System.out.println("## initEventHandlerClasses exception, e = " + e);
+			System.out
+					.println("## initEventHandlerClasses exception, e = " + e);
 		}
 	}
 
@@ -178,6 +199,10 @@ public class EventDistributer implements ApplicationListener<Event> {
 	 * @param eventHandler
 	 */
 	private void addToEventHandlers(String eventCode, EventHandler eventHandler) {
+		if (eventCode == null || "".equals(eventCode.trim())) {
+			return;
+		}
+		eventCode = eventCode.trim();
 		if (!eventHandlers.containsKey(eventCode)) {
 			List<EventHandler> list = new ArrayList<>();
 			list.add(eventHandler);
@@ -203,8 +228,10 @@ public class EventDistributer implements ApplicationListener<Event> {
 		}
 		// 启动监听redis事件队列线程（一个事件一个队列一个线程监听）
 		for (String eventCode : eventCodes) {
-			Thread redisEventQueueListenerWorkerThread = new Thread(new RedisEventQueueListenerWorker(eventCode));
-			redisEventQueueListenerWorkerThread.setName("redisEventQueueListenerWorkerThread_" + eventCode);
+			Thread redisEventQueueListenerWorkerThread = new Thread(
+					new RedisEventQueueListenerWorker(eventCode));
+			redisEventQueueListenerWorkerThread
+					.setName("redisEventQueueListenerWorkerThread_" + eventCode);
 			redisEventQueueListenerWorkerThread.start();
 		}
 	}
@@ -238,22 +265,27 @@ public class EventDistributer implements ApplicationListener<Event> {
 
 		@Override
 		public void run() {
-			System.out.println(
-					"## redisEventQueueListenerWorkerThread start ... thead = " + Thread.currentThread().getName());
+			System.out
+					.println("## redisEventQueueListenerWorkerThread start ... thead = "
+							+ Thread.currentThread().getName());
 			try {
 				// 停止监听轮数，越久没事件来，线程休息越久（会有个阈值）
 				int round = 0;
-				String eventQueueKey = EventManager.getRedisEventQueueCacheKey(eventCode);
+				String eventQueueKey = EventManager
+						.getRedisEventQueueCacheKey(eventCode);
 				while (true) {
 					// 分发事件
-					Object object = redisTemplate.opsForList().rightPop(eventQueueKey);
+					Object object = redisTemplate.opsForList().rightPop(
+							eventQueueKey);
 					if (object != null) {
 						System.out.println("## object = " + object);
-						// Event event = JSONObject.parseObject(JSONObject.toJSONString(object),
+						// Event event =
+						// JSONObject.parseObject(JSONObject.toJSONString(object),
 						// Event.class);
 						Event event = (Event) object;
-						System.out.println("## receive event from redis queue, eventQueueKey = " + eventQueueKey
-								+ ", event = " + event);
+						System.out
+								.println("## receive event from redis queue, eventQueueKey = "
+										+ eventQueueKey + ", event = " + event);
 						// 分发交给事件处理器处理应该是异步的
 						distributeEvent(event);
 						// 重置轮数
@@ -261,9 +293,9 @@ public class EventDistributer implements ApplicationListener<Event> {
 						continue;
 					}
 					// 没事件来，休息一会
-					System.out.println("# redis事件队列没事件来, eventCode = " + eventCode + ", round = " + round
-							+ ", thread = " + Thread.currentThread().getName());
-					// round = round >= MAX_ROUND ? MAX_ROUND : (round++);
+					System.out.println("# redis事件队列没事件来, eventCode = "
+							+ eventCode + ", round = " + round + ", thread = "
+							+ Thread.currentThread().getName());
 					if (round >= MAX_ROUND) {
 						round = MAX_ROUND;
 					} else {

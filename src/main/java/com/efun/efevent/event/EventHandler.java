@@ -29,8 +29,8 @@ public interface EventHandler {
 		try {
 			handle(event);
 		} catch (Exception e) {
+			EventCompensator.waitToResend(event);
 			System.out.println("wait to resend event");
 		}
-
 	}
 }

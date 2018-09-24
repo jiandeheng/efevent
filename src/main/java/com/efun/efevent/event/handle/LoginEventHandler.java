@@ -19,6 +19,9 @@ public class LoginEventHandler implements EventHandler {
 		try {
 			System.out.println("LoginEventHandler start ..., event = " + event);
 			Thread.sleep(5000);
+			if((System.currentTimeMillis() % 2) == 0) {
+				throw new RuntimeException("LoginEventHandler handle exception");
+			}
 			System.out.println("LoginEventHandler end ... ");
 		} catch (InterruptedException e) {
 			e.printStackTrace();

@@ -20,6 +20,9 @@ public class EventFactory {
 	 * @return
 	 */
 	public static Event create(String eventCode, Object data) {
+		if (data == null) {
+			data = new Object();
+		}
 		Event event = new Event(new Object());
 		event.setEventCode(eventCode);
 		event.setData(JSONObject.parseObject(JSONObject.toJSONString(data)));

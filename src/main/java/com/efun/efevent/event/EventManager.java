@@ -14,6 +14,7 @@ import org.apache.rocketmq.client.producer.SendResult;
 import org.apache.rocketmq.common.message.Message;
 import org.apache.rocketmq.remoting.exception.RemotingException;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Component;
@@ -37,6 +38,7 @@ public class EventManager {
 
 	private static DefaultMQProducer producer = null;
 
+	@Value(value = "${efun.event.mq.producer-group}")
 	private static final String PRODUCER_GROUP = "EventManager";
 	private static final String NAME_SERVER_ADDRESS = "127.0.0.1:9876";
 
@@ -48,7 +50,7 @@ public class EventManager {
 	/**
 	 * MQ开关
 	 */
-	private static final boolean MQ_SWITCH = true;
+	private static final boolean MQ_SWITCH = false;
 
 	/**
 	 * redis开关
@@ -99,7 +101,8 @@ public class EventManager {
 				System.out.println("生产者未启动f");
 			}
 			sendMessage(event);
-		} catch (MQClientException | RemotingException | MQBrokerException | InterruptedException e) {
+		} catch (MQClientException | RemotingException | MQBrokerException
+				| InterruptedException e) {
 			e.printStackTrace();
 		} catch (UnsupportedEncodingException e) {
 			e.printStackTrace();
@@ -116,8 +119,9 @@ public class EventManager {
 	 * @throws InterruptedException
 	 * @throws UnsupportedEncodingException
 	 */
-	private void sendMessage(Event event) throws MQClientException, RemotingException, MQBrokerException,
-			InterruptedException, UnsupportedEncodingException {
+	private void sendMessage(Event event) throws MQClientException,
+			RemotingException, MQBrokerException, InterruptedException,
+			UnsupportedEncodingException {
 		Message message = new Message();
 		message.setTopic(event.getEventCode());
 		message.setBody((JSON.toJSONBytes(event, JSON.DEFAULT_GENERATE_FEATURE)));
@@ -152,10 +156,11 @@ public class EventManager {
 			return;
 		}
 		String key = getRedisEventQueueCacheKey(event.getEventCode());
-		// Long result = redisTemplate.opsForList().leftPush(key, JSON.toJSON(event));
+		// Long result = redisTemplate.opsForList().leftPush(key,
+		// JSON.toJSON(event));
 		Long result = redisTemplate.opsForList().leftPush(key, event);
-		System.out.println(
-				"## publish event to redis queue, result = " + result + " key = " + key + ", event = " + event);
+		System.out.println("## publish event to redis queue, result = "
+				+ result + " key = " + key + ", event = " + event);
 	}
 
 	/**
